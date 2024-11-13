@@ -267,13 +267,13 @@ function handleHtmlPage() {
                         if (data.success) {
                             showNotification("通知已发送！");
                         } else {
-                            showNotification("通知发送失败: " + (data.message || '请稍后重试'));
+                            showNotification("通知发送出错，请拨打电话。");
                             console.error('发送失败的详细信息:', data);
                         }
                     })
                     .catch(error => {
                         console.error("发送失败，错误原因:", error);
-                        showNotification("通知发送出错，请检查网络连接。");
+                        showNotification("通知发送出错，请拨打电话。");
                     })
                     .finally(() => {
                         // 请求完成后不需要立即恢复按钮文本，因为已在倒计时中处理
