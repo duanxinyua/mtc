@@ -68,7 +68,7 @@ function handleHtmlPage() {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>通知车主挪车</title>
+                <title>挪车</title>
                 <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 :root {
@@ -168,6 +168,22 @@ function handleHtmlPage() {
                     50% { transform: translateY(-20px) rotate(5deg); }
                     100% { transform: translateY(0px) rotate(0deg); }
                 }
+                .toast {
+                    position: fixed;
+                    top: 30%;  /* 垂直居中 */
+                    left: 50%; /* 水平居中 */
+                    transform: translate(-50%, -50%); /* 调整自身大小使其完美居中 */
+                    background: rgba(0, 0, 0, 0.8);
+                    color: white;
+                    padding: 10px 24px;
+                    border-radius: 20px;
+                    font-size: 14px;
+                    opacity: 0;
+                    transition: opacity 0.3s;
+                }
+                .toast.show {
+                    opacity: 1;
+                }
                 /* 整体车牌的样式 */
                 .license-plate {
                     display: inline-flex;
@@ -220,42 +236,63 @@ function handleHtmlPage() {
                     </button>
                 </div>
                 </div>
-                <script>
-                    function notifyOwner() {
-                        const notifyButton = document.querySelector('.notify-btn');  // 获取按钮
-                        notifyButton.disabled = true;  // 禁用按钮
-                        notifyButton.innerText = "通知发送中...";  // 更改按钮文本，提示用户
-                      
-                        fetch("/sendNotification", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({})
-                        })
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success) {
-                                alert("通知已发送！");
-                            } else {
-                                alert(\`通知发送失败: \${data.message || '请稍后重试'}\`);
-                                console.error('发送失败的详细信息:', data);
-                            }
-                        })
-                        .catch(error => {
-                            console.error("发送失败，错误原因:", error);
-                            alert("通知发送出错，请检查网络连接。");
-                        })
-                        .finally(() => {
-                            // 请求完成后恢复按钮状态
-                            notifyButton.disabled = false;
-                            notifyButton.innerText = "微信通知车主挪车";  // 恢复按钮文本
-                        });
-                    }
+                <div id="toast" class="toast"></div>
 
-                    function callOwner() {
-                        window.location.href = "tel:${phone}";
-                    }
-                </script>
-                
+                <script>
+                function notifyOwner() {
+                    const notifyButton = document.querySelector('.notify-btn');
+                    notifyButton.disabled = true;
+                    notifyButton.innerText = "通知发送中...";
+            
+                    // 启动1分钟倒计时，更新按钮显示
+                    let countdown = 60;
+                    const countdownInterval = setInterval(() => {
+                        notifyButton.innerText = "微信通知车主挪车(" + countdown + "s)";
+                        countdown--;
+                        if (countdown < 0) {
+                            clearInterval(countdownInterval); // 倒计时结束，恢复按钮
+                            notifyButton.innerText = "微信通知车主挪车";
+                            notifyButton.disabled = false;
+                        }
+                    }, 1000);
+            
+                    // 发送通知请求
+                    fetch("/sendNotification", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({})
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showNotification("通知已发送！");
+                        } else {
+                            showNotification("通知发送失败: " + (data.message || '请稍后重试'));
+                            console.error('发送失败的详细信息:', data);
+                        }
+                    })
+                    .catch(error => {
+                        console.error("发送失败，错误原因:", error);
+                        showNotification("通知发送出错，请检查网络连接。");
+                    })
+                    .finally(() => {
+                        // 请求完成后不需要立即恢复按钮文本，因为已在倒计时中处理
+                    });
+                }
+            
+                function callOwner() {
+                    window.location.href = "tel:${phone}";
+                }
+            
+                function showNotification(message, duration = 5000) {
+                    const toast = document.getElementById('toast');
+                    toast.textContent = message;
+                    toast.classList.add('show');
+                    setTimeout(() => {
+                        toast.classList.remove('show');
+                    }, duration);
+                }
+            </script>
             </body>
         </html>
     `;
