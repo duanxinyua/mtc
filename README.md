@@ -1,4 +1,4 @@
-# MTC挪车
+# 微信挪车通知 OR 电话
 
 ## Cloudflare Workers 挪车通知
 
@@ -19,3 +19,7 @@
 
 ### 备注
 - 使用环境变量获取参数，不能使用 JS 加密。
+
+### 部署
+- 直接复制worker.js的代码到worker中新建项目粘贴代码
+- 添加环境变量，手机号码：`PHONE_NUMBER`，WXPUSHER的PPTOKEN：`WXAPPTOKEN`，WXPUSHER的UIDS：`WXPUSHER_UIDS`，添加完成后重新部署。
