@@ -119,7 +119,8 @@ function handleHtmlPage() {
                     animation: float 6s ease-in-out infinite;
                 }
                 p {
-                    margin-bottom: 20px;
+                    // margin-bottom: 20px;
+                    margin: 20px 0;
                     font-size: 12px;
                     color: #546e7a;
                     line-height: 1.3;
