@@ -1,20 +1,18 @@
-let phone;
-let wxpusherAppToken;
-let wxpusherUIDs;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 3;
+const rateLimitStore = new Map();
 
 export default {
     async fetch(request, env, ctx) {
         try {
-            phone = env.PHONE_NUMBER;
-            wxpusherAppToken = env.WXAPPTOKEN;
-            wxpusherUIDs = env.WXPUSHER_UIDS;
+            const phone = env.PHONE_NUMBER || "";
 
             // 判断请求的路径
             const url = new URL(request.url);
             if (url.pathname === '/sendNotification') {
                 return await handleNotificationRequest(request, env);
             } else {
-                return handleHtmlPage();
+                return handleHtmlPage(phone);
             }
 
         } catch (err) {
@@ -25,9 +23,42 @@ export default {
 };
 
 async function handleNotificationRequest(request, env) {
-    const body = await request.json();
-
     try {
+        if (request.method !== "POST") {
+            return new Response("Method Not Allowed", {
+                status: 405,
+                headers: { "Allow": "POST" },
+            });
+        }
+
+        const origin = request.headers.get("Origin");
+        const expectedOrigin = new URL(request.url).origin;
+        if (origin && origin !== expectedOrigin) {
+            return new Response(
+                JSON.stringify({ success: false, message: "非法来源请求" }),
+                { status: 403, headers: { "Content-Type": "application/json" } }
+            );
+        }
+
+        const ip = getClientIp(request);
+        if (ip && !allowRequest(ip)) {
+            return new Response(
+                JSON.stringify({ success: false, message: "请求过于频繁，请稍后再试" }),
+                { status: 429, headers: { "Content-Type": "application/json" } }
+            );
+        }
+
+        const wxpusherAppToken = env.WXAPPTOKEN || "";
+        const wxpusherUIDsRaw = env.WXPUSHER_UIDS || "";
+        const uids = parseUids(wxpusherUIDsRaw);
+
+        if (!wxpusherAppToken || uids.length === 0) {
+            return new Response(
+                JSON.stringify({ success: false, message: "通知参数未配置" }),
+                { status: 500, headers: { "Content-Type": "application/json" } }
+            );
+        }
+
         // 发送 Wxpusher 通知的请求
         const response = await fetch("https://wxpusher.zjiecode.com/api/send/message", {
             method: "POST",
@@ -36,19 +67,27 @@ async function handleNotificationRequest(request, env) {
                 appToken: wxpusherAppToken,
                 content: "您好，有人需要您挪车，请及时处理。",
                 contentType: 1,
-                uids: wxpusherUIDs,
+                uids,
             }),
         });
 
-        const data = await response.json();
+        let data = null;
+        try {
+            data = await response.json();
+        } catch (parseError) {
+            console.error("通知响应解析失败:", parseError);
+        }
 
-        if (data.code === 1000) {
+        if (data && data.code === 1000) {
             return new Response(JSON.stringify({ success: true }), {
                 headers: { "Content-Type": "application/json" },
             });
         } else {
             return new Response(
-                JSON.stringify({ success: false, message: data.message || "通知发送失败" }),
+                JSON.stringify({
+                    success: false,
+                    message: (data && data.message) || "通知发送失败",
+                }),
                 { headers: { "Content-Type": "application/json" } }
             );
         }
@@ -61,7 +100,38 @@ async function handleNotificationRequest(request, env) {
     }
 }
 
-function handleHtmlPage() {
+function getClientIp(request) {
+    const cfIp = request.headers.get("CF-Connecting-IP");
+    if (cfIp) return cfIp;
+    const forwardedFor = request.headers.get("X-Forwarded-For");
+    if (!forwardedFor) return "";
+    return forwardedFor.split(",")[0].trim();
+}
+
+function allowRequest(ip) {
+    const now = Date.now();
+    const current = rateLimitStore.get(ip);
+    if (!current || now > current.resetAt) {
+        rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return true;
+    }
+    if (current.count >= RATE_LIMIT_MAX) {
+        return false;
+    }
+    current.count += 1;
+    return true;
+}
+
+function parseUids(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(Boolean);
+    return String(raw)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function handleHtmlPage(phone) {
     const htmlContent = `
             <!DOCTYPE html>
             <html lang="zh-CN">
@@ -119,7 +189,7 @@ function handleHtmlPage() {
                     animation: float 6s ease-in-out infinite;
                 }
                 p {
-                    // margin-bottom: 20px;
+                    /* margin-bottom: 20px; */
                     margin: 20px 0;
                     font-size: 12px;
                     color: #546e7a;
@@ -240,49 +310,62 @@ function handleHtmlPage() {
                 <div id="toast" class="toast"></div>
 
                 <script>
-                function notifyOwner() {
+                const ownerPhone = "${phone}";
+
+                async function notifyOwner() {
                     const notifyButton = document.querySelector('.notify-btn');
+                    if (notifyButton.disabled) return;
                     notifyButton.disabled = true;
                     notifyButton.innerText = "通知发送中...";
-            
-                    // 启动1分钟倒计时，更新按钮显示
+
+                    let countdownInterval = null;
                     let countdown = 60;
-                    const countdownInterval = setInterval(() => {
+
+                    const resetButton = () => {
+                        if (countdownInterval) clearInterval(countdownInterval);
+                        notifyButton.innerText = "微信通知车主挪车";
+                        notifyButton.disabled = false;
+                    };
+
+                    const startCountdown = () => {
                         notifyButton.innerText = "微信通知车主挪车(" + countdown + "s)";
-                        countdown--;
-                        if (countdown < 0) {
-                            clearInterval(countdownInterval); // 倒计时结束，恢复按钮
-                            notifyButton.innerText = "微信通知车主挪车";
-                            notifyButton.disabled = false;
-                        }
-                    }, 1000);
-            
-                    // 发送通知请求
-                    fetch("/sendNotification", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({})
-                    })
-                    .then(response => response.json())
-                    .then(data => {
+                        countdownInterval = setInterval(() => {
+                            countdown--;
+                            notifyButton.innerText = "微信通知车主挪车(" + countdown + "s)";
+                            if (countdown <= 0) {
+                                resetButton();
+                            }
+                        }, 1000);
+                    };
+
+                    try {
+                        const response = await fetch("/sendNotification", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({})
+                        });
+                        const data = await response.json();
                         if (data.success) {
                             showNotification("通知已发送！");
+                            startCountdown();
                         } else {
                             showNotification("通知发送出错，请拨打电话。");
-                            console.error('发送失败的详细信息:', data);
+                            console.error("发送失败的详细信息:", data);
+                            resetButton();
                         }
-                    })
-                    .catch(error => {
+                    } catch (error) {
                         console.error("发送失败，错误原因:", error);
                         showNotification("通知发送出错，请拨打电话。");
-                    })
-                    .finally(() => {
-                        // 请求完成后不需要立即恢复按钮文本，因为已在倒计时中处理
-                    });
+                        resetButton();
+                    }
                 }
             
                 function callOwner() {
-                    window.location.href = "tel:${phone}";
+                    if (!ownerPhone) {
+                        showNotification("未配置电话号码");
+                        return;
+                    }
+                    window.location.href = "tel:" + ownerPhone;
                 }
             
                 function showNotification(message, duration = 5000) {
